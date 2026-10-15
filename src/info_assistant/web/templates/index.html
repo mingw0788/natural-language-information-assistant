@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}开始采集 · 自然语言信息采集助手{% endblock %}
+{% block content %}
+  <section class="hero">
+    <p class="eyebrow">把问题变成有来源的答案</p>
+    <h1>你想查什么？</h1>
+    <p class="intro">用日常语言描述目标。任务开始前会展示理解结果、需要的服务和数据流。</p>
+    <div class="capability-note" role="status">
+      搜索和模型服务尚未配置。你仍可提交网址或粘贴文字进行本地处理。
+    </div>
+    <form class="task-form">
+      <label for="task-input">采集需求</label>
+      <textarea id="task-input" name="query" rows="5" placeholder="例如：比较这三家公司的免费套餐，列出价格、限制和官方来源……"></textarea>
+      <div class="form-actions">
+        <label class="url-label" for="source-input">可选：网址或补充材料</label>
+        <button type="button" class="primary-button" disabled>检查任务条件</button>
+      </div>
+      <textarea id="source-input" name="sources" rows="2" placeholder="粘贴网址或你希望一起分析的文字"></textarea>
+      <p class="helper-text">首版只访问公开网页和文字 PDF；不会登录网站或执行网页中的操作。</p>
+    </form>
+  </section>
+{% endblock %}
