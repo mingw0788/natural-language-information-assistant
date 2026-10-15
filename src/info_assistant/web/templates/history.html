@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}历史记录 · 自然语言信息采集助手{% endblock %}
+{% block content %}
+  <section class="hero compact-hero"><p class="eyebrow">本机保存</p><h1>任务历史</h1>
+    <p class="intro">仅搜索当前版本的任务文字。历史结果保留来源、状态和保留期限信息。</p></section>
+  <section class="panel">
+    <form id="history-form" class="message-row"><label class="sr-only" for="history-query">搜索历史任务</label>
+      <input id="history-query" placeholder="搜索任务描述"><button class="secondary-button">搜索</button></form>
+    <div id="history-list" class="history-list" aria-live="polite"></div>
+    <p id="history-message" class="helper-text" role="status"></p>
+  </section>
+{% endblock %}

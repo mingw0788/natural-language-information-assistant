@@ -130,7 +130,7 @@ class SourceSnapshot(StrictModel):
 
 
 class EvidenceRef(StrictModel):
-    snapshot_id: str
+    snapshot_id: str | None = None
     start: int = Field(ge=0)
     end: int = Field(gt=0)
     quote: str = Field(min_length=1, max_length=2_000)
@@ -176,7 +176,7 @@ class Observation(StrictModel):
         if (
             self.origin == ValueOrigin.SOURCE
             and self.status in {ObservationStatus.CONFIRMED, ObservationStatus.USER_CONFIRMED}
-            and not self.evidence
+            and not any(item.snapshot_id is not None for item in self.evidence)
         ):
             raise ValueError("confirmed source observations require evidence")
         return self

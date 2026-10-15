@@ -3,14 +3,21 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{% block title %}自然语言信息采集助手{% endblock %}</title>
     <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/app.js" defer></script>
   </head>
   <body>
     <header class="site-header">
       <a class="brand" href="/">自然语言信息采集助手</a>
-      <span class="local-badge">本机运行</span>
+      <nav aria-label="主导航">
+        <a href="/history">历史</a>
+        <a href="/settings">设置</a>
+      </nav>
+      <span class="local-badge">仅本机运行</span>
     </header>
     <main class="page-shell">{% block content %}{% endblock %}</main>
+    <footer class="site-footer">只读取公开来源。搜索摘要只是线索，结果会尽量保留可核对的原文和出处。</footer>
   </body>
 </html>

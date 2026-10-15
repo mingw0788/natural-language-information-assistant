@@ -50,3 +50,36 @@ def test_restart_marks_running_run_interrupted_and_keeps_its_identity(tmp_path) 
     assert repository.get_run(run.id).status == RunStatus.INTERRUPTED
     assert snapshot.used.get("model_calls", 0) == 1
     assert pending.id
+
+
+def test_pause_and_restart_do_not_reset_the_active_time_budget(tmp_path) -> None:
+    _, repository, _, control, task = setup_control(tmp_path)
+    run = control.enqueue(task.id, task.latest_version.id)
+    start = datetime(2026, 10, 15, 10, 0, tzinfo=UTC)
+    control.start(run.id, start)
+    paused = control.pause(run.id, start.replace(minute=2))
+    assert paused.active_seconds == 120
+
+    control.resume(run.id)
+    control.start(run.id, start.replace(minute=20))
+    assert control.elapsed_active_seconds(run.id, start.replace(minute=21)) == 180
+
+    recovered = control.recover_after_restart(start.replace(minute=22))
+    interrupted = repository.get_run(run.id)
+    assert recovered == [run.id]
+    assert interrupted.active_seconds == 240
+    assert control.elapsed_active_seconds(run.id, start.replace(minute=25)) == 240
+
+
+def test_resume_clears_old_interruption_marker_and_preserves_budget(tmp_path) -> None:
+    _, repository, ledger, control, task = setup_control(tmp_path)
+    run = control.enqueue(task.id, task.latest_version.id)
+    control.start(run.id, datetime(2026, 10, 15, tzinfo=UTC))
+    control.recover_after_restart(datetime(2026, 10, 16, tzinfo=UTC))
+
+    resumed = control.resume(run.id)
+
+    assert resumed.status == RunStatus.QUEUED
+    assert resumed.finished_at is None
+    assert resumed.stop_reason is None
+    assert ledger.snapshot(run.id).used["active_run"] == 1

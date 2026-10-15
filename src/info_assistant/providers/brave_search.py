@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from info_assistant.providers.base import (
@@ -34,6 +36,12 @@ class BraveSearchProvider:
             params["country"] = query.country
         if query.language:
             params["search_lang"] = query.language
+        if query.freshness:
+            if query.freshness not in {"pd", "pw", "pm", "py"} and not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2}", query.freshness
+            ):
+                raise ProviderError("搜索时间范围格式无效")
+            params["freshness"] = query.freshness
         try:
             headers = {"Accept": "application/json", "X-Subscription-Token": secret}
             if self.client:
@@ -64,4 +72,3 @@ class BraveSearchProvider:
             if item.get("url")
         ]
         return SearchResponse(results=results, provider="Brave Search")
-

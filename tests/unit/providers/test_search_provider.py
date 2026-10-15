@@ -30,12 +30,18 @@ def test_brave_search_maps_results_without_treating_snippet_as_evidence() -> Non
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     provider = BraveSearchProvider(credentials, client=client)
-    response = provider.search(SearchQuery(query="example official pricing"))
+    response = provider.search(
+        SearchQuery(
+            query="example official pricing",
+            freshness="2026-10-01to2026-10-15",
+        )
+    )
 
     assert response.results[0].url == "https://example.com/plans"
     assert response.results[0].snippet.startswith("Basic tier")
     assert response.results[0].is_evidence is False
     assert requests[0].headers["X-Subscription-Token"] == "test-token"
+    assert "freshness=2026-10-01to2026-10-15" in str(requests[0].url)
 
 
 def test_search_provider_fails_closed_without_configured_key() -> None:

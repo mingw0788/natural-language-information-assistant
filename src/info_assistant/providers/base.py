@@ -18,6 +18,7 @@ class SearchQuery:
     count: int = 10
     country: str | None = None
     language: str | None = None
+    freshness: str | None = None
 
 
 @dataclass(frozen=True)

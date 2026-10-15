@@ -11,5 +11,5 @@ def test_migration_is_repeatable_and_enables_foreign_keys(tmp_path) -> None:
         migrations = connection.execute("SELECT version FROM schema_migrations").fetchall()
         foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()[0]
 
-    assert [row[0] for row in migrations] == [1, 2, 3]
+    assert [row[0] for row in migrations] == [1, 2, 3, 4, 5, 6, 7]
     assert foreign_keys == 1

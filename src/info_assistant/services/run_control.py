@@ -53,19 +53,30 @@ class RunControl:
                     (current.astimezone(UTC).isoformat(), run_id),
                 )
             connection.execute(
-                "UPDATE runs SET status='running', started_at=COALESCE(started_at, ?) WHERE id=?",
-                (current.astimezone(UTC).isoformat(), run_id),
+                "UPDATE runs SET status='running', started_at=COALESCE(started_at, ?), "
+                "active_started_at=COALESCE(active_started_at, ?) WHERE id=?",
+                (
+                    current.astimezone(UTC).isoformat(),
+                    current.astimezone(UTC).isoformat(),
+                    run_id,
+                ),
             )
         return self.repository.get_run(run_id)
 
-    def pause(self, run_id: str) -> RunRecord:
+    def pause(self, run_id: str, now: datetime | None = None) -> RunRecord:
+        current = now or datetime.now(UTC)
         with self.database.transaction() as connection:
-            row = connection.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()
+            row = connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
             if row is None:
                 raise KeyError(run_id)
             if row["status"] not in {RunStatus.RUNNING.value, RunStatus.PAUSING.value}:
                 raise InvalidRunTransition(row["status"])
-            connection.execute("UPDATE runs SET status='paused' WHERE id=?", (run_id,))
+            elapsed = self._active_seconds(row, current)
+            connection.execute(
+                "UPDATE runs SET status='paused', active_seconds=?, active_started_at=NULL "
+                "WHERE id=?",
+                (elapsed, run_id),
+            )
         return self.repository.get_run(run_id)
 
     def resume(self, run_id: str) -> RunRecord:
@@ -75,13 +86,16 @@ class RunControl:
                 raise KeyError(run_id)
             if row["status"] not in {RunStatus.PAUSED.value, RunStatus.INTERRUPTED.value}:
                 raise InvalidRunTransition(row["status"])
-            connection.execute("UPDATE runs SET status='queued' WHERE id=?", (run_id,))
+            connection.execute(
+                "UPDATE runs SET status='queued', finished_at=NULL, stop_reason=NULL WHERE id=?",
+                (run_id,),
+            )
         return self.repository.get_run(run_id)
 
     def cancel(self, run_id: str, now: datetime | None = None) -> RunRecord:
         current = now or datetime.now(UTC)
         with self.database.transaction() as connection:
-            row = connection.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()
+            row = connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
             if row is None:
                 raise KeyError(run_id)
             if row["status"] in {
@@ -91,14 +105,21 @@ class RunControl:
             }:
                 raise InvalidRunTransition(row["status"])
             self.ledger.settle_uncertain_for_run(connection, run_id, current)
+            elapsed = self._active_seconds(row, current)
             connection.execute(
                 "UPDATE runs SET status='cancelled', finished_at=?, "
-                "stop_reason='用户取消' WHERE id=?",
-                (current.astimezone(UTC).isoformat(), run_id),
+                "stop_reason='用户取消', active_seconds=?, active_started_at=NULL WHERE id=?",
+                (current.astimezone(UTC).isoformat(), elapsed, run_id),
             )
         return self.repository.get_run(run_id)
 
-    def finish(self, run_id: str, status: RunStatus, stop_reason: str | None = None) -> RunRecord:
+    def finish(
+        self,
+        run_id: str,
+        status: RunStatus,
+        stop_reason: str | None = None,
+        now: datetime | None = None,
+    ) -> RunRecord:
         if status not in {
             RunStatus.COMPLETED,
             RunStatus.PARTIAL,
@@ -107,27 +128,56 @@ class RunControl:
             RunStatus.CANCELLED,
         }:
             raise ValueError("finish requires a terminal run status")
-        now = datetime.now(UTC).isoformat()
+        current = now or datetime.now(UTC)
         with self.database.transaction() as connection:
-            self.ledger.settle_uncertain_for_run(connection, run_id, datetime.now(UTC))
+            row = connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            self.ledger.settle_uncertain_for_run(connection, run_id, current)
+            elapsed = self._active_seconds(row, current)
             connection.execute(
-                "UPDATE runs SET status=?, finished_at=?, stop_reason=? WHERE id=?",
-                (status.value, now, stop_reason, run_id),
+                "UPDATE runs SET status=?, finished_at=?, stop_reason=?, active_seconds=?, "
+                "active_started_at=NULL WHERE id=?",
+                (status.value, current.astimezone(UTC).isoformat(), stop_reason, elapsed, run_id),
             )
         return self.repository.get_run(run_id)
+
+    def elapsed_active_seconds(self, run_id: str, now: datetime | None = None) -> int:
+        current = now or datetime.now(UTC)
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT active_seconds, active_started_at FROM runs WHERE id=?", (run_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return self._active_seconds(row, current)
+
+    @staticmethod
+    def _active_seconds(row, now: datetime) -> int:
+        elapsed = int(row["active_seconds"])
+        if row["active_started_at"]:
+            started = datetime.fromisoformat(row["active_started_at"])
+            elapsed += max(0, int((now.astimezone(UTC) - started.astimezone(UTC)).total_seconds()))
+        return elapsed
 
     def recover_after_restart(self, now: datetime | None = None) -> list[str]:
         current = now or datetime.now(UTC)
         with self.database.transaction() as connection:
             rows = connection.execute(
-                "SELECT id FROM runs WHERE status IN ('running', 'pausing')"
+                "SELECT * FROM runs WHERE status IN ('running', 'pausing')"
             ).fetchall()
             run_ids = [row["id"] for row in rows]
-            for run_id in run_ids:
+            for row in rows:
+                run_id = row["id"]
                 self.ledger.settle_uncertain_for_run(connection, run_id, current)
                 connection.execute(
                     "UPDATE runs SET status='interrupted', finished_at=?, "
-                    "stop_reason='程序中断；在途调用按已使用额度保留' WHERE id=?",
-                    (current.astimezone(UTC).isoformat(), run_id),
+                    "stop_reason='程序中断；在途调用按已使用额度保留', active_seconds=?, "
+                    "active_started_at=NULL WHERE id=?",
+                    (
+                        current.astimezone(UTC).isoformat(),
+                        self._active_seconds(row, current),
+                        run_id,
+                    ),
                 )
             return run_ids

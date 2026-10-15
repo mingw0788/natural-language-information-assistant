@@ -36,8 +36,7 @@ class Repository:
         created = _stamp(version.created_at)
         with self.database.transaction() as connection:
             connection.execute(
-                "INSERT INTO tasks(id, created_at, updated_at, latest_version) "
-                "VALUES (?, ?, ?, 1)",
+                "INSERT INTO tasks(id, created_at, updated_at, latest_version) VALUES (?, ?, ?, 1)",
                 (task_id, created, created),
             )
             self._insert_version(connection, version)
@@ -173,6 +172,81 @@ class Repository:
             stop_reason=row["stop_reason"],
         )
 
+    def spec_for_run(self, run_id: str) -> TaskSpec:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT v.spec_json FROM runs r JOIN task_versions v ON v.id=r.version_id "
+                "WHERE r.id=?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return TaskSpec.model_validate_json(row["spec_json"])
+
+    def mark_source_state(
+        self,
+        run_id: str,
+        canonical_url: str,
+        status: str,
+        *,
+        next_url: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any]:
+        if status not in {"queued", "fetching", "paused", "fetched", "failed", "unknown"}:
+            raise ValueError("invalid source run status")
+        stamp = _stamp(datetime.now(UTC))
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO run_source_states(run_id, canonical_url, status, attempts, next_url, "
+                "error_code, error_message, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(run_id, canonical_url) DO UPDATE SET status=excluded.status, "
+                "attempts=run_source_states.attempts + CASE WHEN excluded.status='fetching' "
+                "THEN 1 ELSE 0 END, next_url=excluded.next_url, "
+                "error_code=excluded.error_code, error_message=excluded.error_message, "
+                "updated_at=excluded.updated_at",
+                (
+                    run_id,
+                    canonical_url,
+                    status,
+                    1 if status == "fetching" else 0,
+                    next_url,
+                    error_code,
+                    error_message,
+                    stamp,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM run_source_states WHERE run_id=? AND canonical_url=?",
+                (run_id, canonical_url),
+            ).fetchone()
+        return dict(row)
+
+    def source_state(self, run_id: str, canonical_url: str) -> dict[str, Any] | None:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM run_source_states WHERE run_id=? AND canonical_url=?",
+                (run_id, canonical_url),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def source_states_for_run(self, run_id: str) -> list[dict[str, Any]]:
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM run_source_states WHERE run_id=? ORDER BY canonical_url",
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def has_snapshot(self, run_id: str, canonical_url: str) -> bool:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM source_snapshots ss JOIN sources s ON s.id=ss.source_id "
+                "WHERE ss.run_id=? AND s.canonical_url=? LIMIT 1",
+                (run_id, canonical_url),
+            ).fetchone()
+        return row is not None
+
     def append_event(
         self,
         run_id: str,
@@ -257,18 +331,16 @@ class Repository:
             title=row["title"],
             status=row["status"],
             last_checked_at=(
-                datetime.fromisoformat(row["last_checked_at"])
-                if row["last_checked_at"]
-                else None
+                datetime.fromisoformat(row["last_checked_at"]) if row["last_checked_at"] else None
             ),
             error_code=row["error_code"],
             error_message=row["error_message"],
         )
 
     def save_snapshot(self, snapshot: SourceSnapshot) -> SourceSnapshot:
-        content_hash = snapshot.content_hash or hashlib.sha256(
-            snapshot.text.encode("utf-8")
-        ).hexdigest()
+        content_hash = (
+            snapshot.content_hash or hashlib.sha256(snapshot.text.encode("utf-8")).hexdigest()
+        )
         with self.database.transaction() as connection:
             connection.execute(
                 "INSERT INTO source_snapshots(id, source_id, run_id, fetched_at, content_type, "
@@ -308,7 +380,9 @@ class Repository:
         run_id: str,
         observation: Observation,
         idempotency_key: str,
+        identity_key: str | None = None,
     ) -> Observation:
+        stable_identity_key = identity_key or observation.entity_key
         with self.database.transaction() as connection:
             existing = connection.execute(
                 "SELECT id, entity_id FROM observations WHERE idempotency_key=?",
@@ -318,7 +392,7 @@ class Repository:
                 return self._load_observation(connection, existing["id"])
             entity = connection.execute(
                 "SELECT id FROM entities WHERE task_id=? AND identity_key=?",
-                (task_id, observation.entity_key),
+                (task_id, stable_identity_key),
             ).fetchone()
             entity_id = entity["id"] if entity else str(uuid4())
             if entity is None:
@@ -329,7 +403,7 @@ class Repository:
                         entity_id,
                         task_id,
                         observation.entity_key,
-                        observation.entity_key,
+                        stable_identity_key,
                         _stamp(datetime.now(UTC)),
                     ),
                 )
@@ -358,9 +432,19 @@ class Repository:
                 ),
             )
             for evidence in observation.evidence:
+                source = None
+                if evidence.snapshot_id:
+                    source = connection.execute(
+                        "SELECT s.url, s.title, ss.fetched_at FROM source_snapshots ss "
+                        "JOIN sources s ON s.id=ss.source_id WHERE ss.id=?",
+                        (evidence.snapshot_id,),
+                    ).fetchone()
+                if source is None:
+                    raise ValueError("new evidence must reference a saved source snapshot")
                 connection.execute(
                     "INSERT INTO observation_evidence(observation_id, snapshot_id, start_offset, "
-                    "end_offset, quote, page_number, locator) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "end_offset, quote, page_number, locator, source_url, source_title, "
+                    "source_fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         observation.id,
                         evidence.snapshot_id,
@@ -369,6 +453,9 @@ class Repository:
                         evidence.quote,
                         evidence.page_number,
                         evidence.locator,
+                        source["url"],
+                        source["title"],
+                        source["fetched_at"],
                     ),
                 )
             return self._load_observation(connection, observation.id)
@@ -418,3 +505,9 @@ class Repository:
             ).fetchall()
             return [self._load_observation(connection, row["id"]) for row in rows]
 
+    def observations_for_run(self, run_id: str) -> list[Observation]:
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                "SELECT id FROM observations WHERE run_id=? ORDER BY observed_at, id", (run_id,)
+            ).fetchall()
+            return [self._load_observation(connection, row["id"]) for row in rows]
