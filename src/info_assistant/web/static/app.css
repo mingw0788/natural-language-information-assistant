@@ -49,6 +49,9 @@ h3 { margin: 0 0 8px; font-size: 16px; }
 .notice, .capability-note { white-space: pre-line; margin: 16px 0; padding: 13px 15px; color: #694a0b; background: #fff7df; border: 1px solid #ead99e; border-radius: 8px; line-height: 1.55; }
 .task-form, .panel { padding: clamp(18px, 3vw, 26px); background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 36px #233b5d0a; }
 .task-form { display: grid; gap: 12px; }
+.supplemental-input { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid #e7ebf2; border-radius: 8px; }
+.supplemental-input summary { color: #43536c; font-weight: 600; cursor: pointer; }
+.supplemental-input label { margin-top: 2px; font-size: 14px; }
 label, legend { font-weight: 650; }
 input, textarea, select { width: 100%; min-height: 42px; padding: 10px 12px; color: var(--ink); background: #fff; border: 1px solid #cbd4e1; border-radius: 7px; }
 textarea { min-height: 70px; resize: vertical; line-height: 1.5; }
@@ -96,6 +99,8 @@ textarea:focus, input:focus, select:focus { border-color: #4779d1; }
 .export-pick input { width: 16px; min-height: 16px; }
 .result-list { display: grid; gap: 14px; }
 .result-card { padding: 17px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.source-card h3 { overflow-wrap: anywhere; }
+.source-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: #495870; }
 .result-heading { display: flex; align-items: center; gap: 12px; justify-content: space-between; margin-bottom: 12px; }
 .result-heading h3 { margin: 0; font-size: 18px; }
 .comparison-results { margin: 14px 0 20px; overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: #fff; }

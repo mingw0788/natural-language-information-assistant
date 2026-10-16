@@ -11,6 +11,7 @@ from info_assistant.domain.models import Observation, SourceRecord, SourceSnapsh
 from info_assistant.providers.base import (
     ModelCallBudget,
     ModelProvider,
+    ProviderError,
     SearchProvider,
     SearchQuery,
 )
@@ -25,6 +26,7 @@ from info_assistant.services.run_control import (
     RunControl,
 )
 from info_assistant.services.source_fetcher import FetchOutcome, SourceFetcher
+from info_assistant.services.task_planner import TaskPlanner
 from info_assistant.storage.database import Database
 from info_assistant.storage.repository import Repository
 
@@ -110,8 +112,16 @@ class CollectionRunner:
                         f"{spec.time_window.end.date().isoformat()}"
                     )
                 response = self.search_provider.search(
-                    SearchQuery(query=spec.raw_input, count=8, freshness=freshness)
+                    SearchQuery(
+                        query=TaskPlanner.build_search_query(spec), count=8, freshness=freshness
+                    )
                 )
+            except ProviderError as exc:
+                self.ledger.settle(reservation.id, None)
+                reason = str(exc)
+                self._event(run_id, "source_error", reason, {"stage": "search"})
+                self.control.finish(run_id, RunStatus.BLOCKED, reason)
+                return
             except Exception:
                 self.ledger.settle(reservation.id, None)
                 self._event(
@@ -222,6 +232,10 @@ class CollectionRunner:
                     response = self.search_provider.search(
                         SearchQuery(query=query, count=2, freshness=freshness)
                     )
+                except ProviderError as exc:
+                    self.ledger.settle(reservation.id, None)
+                    self._event(run_id, "search_error", f"补充搜索停止：{exc}")
+                    return
                 except Exception:
                     self.ledger.settle(reservation.id, None)
                     self._event(run_id, "search_error", "补充搜索失败；本轮已用额度按结果未知计入")
@@ -290,7 +304,7 @@ class CollectionRunner:
 
     @staticmethod
     def _supplement_queries(spec: TaskSpec) -> list[str]:
-        base = spec.raw_input.strip()[:280]
+        base = TaskPlanner.build_search_query(spec)[:280]
         requested_fields = " ".join(field.name for field in spec.fields[:8])
         conditions = " ".join(condition.text for condition in spec.required_conditions[:4])
         if requested_fields or conditions:

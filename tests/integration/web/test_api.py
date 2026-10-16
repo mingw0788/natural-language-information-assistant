@@ -62,6 +62,9 @@ def test_create_direct_source_task_and_list_history(tmp_path) -> None:
 
 def test_missing_search_configuration_is_reported_before_run(tmp_path) -> None:
     client, headers = client_for(tmp_path)
+    client.put(
+        "/api/settings/providers", json={"search_provider": "baidu"}, headers=headers
+    )
     created = client.post(
         "/api/tasks",
         json={"raw_input": "列出几款本地 AI 编程工具", "supplemental_material": ""},
@@ -73,6 +76,31 @@ def test_missing_search_configuration_is_reported_before_run(tmp_path) -> None:
     response = client.post(f"/api/tasks/{created.json()['id']}/runs", headers=headers)
     assert response.status_code == 409
     assert response.json()["detail"]["missing"]
+
+
+def test_task_preview_returns_focused_search_terms_for_natural_language(tmp_path) -> None:
+    client, headers = client_for(tmp_path)
+    created = client.post(
+        "/api/tasks",
+        json={
+            "raw_input": (
+                "请帮我找几款适合家庭的空气净化器，比较价格、适用面积和滤芯成本，"
+                "优先使用官方来源"
+            ),
+            "supplemental_material": "",
+        },
+        headers=headers,
+    )
+
+    assert created.status_code == 201
+    search_query = created.json()["search_query"]
+    assert "请帮我" not in search_query
+    assert "空气净化器" in search_query
+    assert "价格" in search_query
+    assert "费用" in search_query
+    assert "适用面积" in search_query
+    assert "滤芯成本" in search_query
+    assert "官方来源" in search_query
 
 
 def test_recent_time_window_is_frozen_at_each_run_start(tmp_path) -> None:
@@ -132,7 +160,7 @@ def test_provider_settings_never_return_secret_and_require_csrf(tmp_path) -> Non
     secret = "do-not-return-this-secret"
     updated = client.put(
         "/api/settings/providers",
-        json={"search_secret": secret},
+        json={"search_provider": "baidu", "search_secret": secret},
         headers=headers,
     )
     assert updated.status_code == 200
@@ -141,6 +169,88 @@ def test_provider_settings_never_return_secret_and_require_csrf(tmp_path) -> Non
 
     denied = client.put("/api/settings/providers", json={"search_secret": "other-secret"})
     assert denied.status_code == 403
+
+
+def test_domestic_provider_settings_save_preset_without_exposing_keys(tmp_path) -> None:
+    client, headers = client_for(tmp_path)
+
+    updated = client.put(
+        "/api/settings/providers",
+        json={
+            "search_provider": "baidu",
+            "search_secret": "baidu-test-key",
+            "model_preset": "zhipu_free",
+            "model_secret": "zhipu-test-key",
+        },
+        headers=headers,
+    )
+
+    assert updated.status_code == 200
+    public = updated.json()
+    assert public["search_configured"] is True
+    assert public["model_configured"] is True
+    assert public["model_name"] == "glm-4.7-flash"
+    assert public["model_json_mode"] == "json_object"
+    assert "baidu-test-key" not in updated.text
+    assert "zhipu-test-key" not in updated.text
+
+
+def test_invalid_domestic_provider_choice_is_rejected(tmp_path) -> None:
+    client, headers = client_for(tmp_path)
+
+    response = client.put(
+        "/api/settings/providers", json={"search_provider": "unknown"}, headers=headers
+    )
+
+    assert response.status_code == 422
+
+
+def test_no_api_collection_exposes_source_text_without_model_extraction(tmp_path) -> None:
+    from info_assistant.providers.base import SearchResponse, SearchResult
+
+    class PublicPageSearch:
+        def search(self, query):
+            return SearchResponse(
+                results=[SearchResult("公开资料", "https://example.test/info", "搜索线索")],
+                provider="普通网页搜索",
+            )
+
+    class PlainPageFetcher:
+        def fetch(self, url, **kwargs):
+            return FetchOutcome(
+                status="fetched", requested_url=url, final_url=url, title="公开资料",
+                text="这是实际读取的公开网页正文，不是搜索摘要。", content_type="text/plain",
+                http_status=200,
+            )
+
+    app = create_app(AppSettings(
+        data_dir=tmp_path, credentials=InMemoryCredentialStore(),
+        search_provider=PublicPageSearch(), fetcher=PlainPageFetcher(), auto_dispatch=False,
+    ))
+    client = TestClient(app)
+    headers = {"Origin": "http://testserver", "X-CSRF-Token": app.state.csrf_token}
+    created = client.post("/api/tasks", json={"raw_input": "收集公开资料"}, headers=headers)
+
+    assert created.json()["capability"]["ready"] is True
+    run = client.post(f"/api/tasks/{created.json()['id']}/runs", headers=headers).json()
+    app.state.runner.run(run["id"])
+    result = client.get(f"/api/tasks/{created.json()['id']}/results").json()
+
+    assert result["run_status"] == "completed"
+    assert result["items"] == []
+    assert result["sources"][0]["url"] == "https://example.test/info"
+    assert result["sources"][0]["excerpt"] == "这是实际读取的公开网页正文，不是搜索摘要。"
+    assert app.state.ledger.snapshot(run["id"]).used.get("model_calls", 0) == 0
+    exported = client.post(
+        f"/api/tasks/{created.json()['id']}/export",
+        json={"format": "json", "view": "all"},
+        headers=headers,
+    )
+    assert exported.status_code == 200
+    export_data = exported.json()
+    assert export_data["records"] == []
+    assert export_data["sources"][0]["record_type"] == "source"
+    assert export_data["sources"][0]["excerpt"] == "这是实际读取的公开网页正文，不是搜索摘要。"
 
 
 def test_foreign_host_and_origin_are_rejected(tmp_path) -> None:
@@ -228,6 +338,7 @@ def test_local_collection_results_correction_and_undo(tmp_path) -> None:
     assert retained.status_code == 200
     after_delete = client.get(f"/api/tasks/{created.json()['id']}/results").json()
     assert after_delete["items"][0]["observations"][0]["status"] == "evidence_missing"
+    assert after_delete["sources"] == []
     assert after_delete["items"][0]["observations"][0]["evidence"][0]["snapshot_available"] is False
 
     deleted = client.delete(

@@ -6,7 +6,7 @@ import pytest
 
 from info_assistant.domain.enums import RunStatus
 from info_assistant.domain.models import SourceInput, TaskField, TaskSpec
-from info_assistant.providers.base import SearchResponse, SearchResult
+from info_assistant.providers.base import ProviderError, SearchResponse, SearchResult
 from info_assistant.services.budget_ledger import BudgetLedger
 from info_assistant.services.collection_runner import CollectionRunner
 from info_assistant.services.run_control import RunControl
@@ -148,7 +148,7 @@ def test_search_snippets_are_only_leads_and_failed_source_is_partial(tmp_path: P
     runner.run(run.id)
 
     assert repository.get_run(run.id).status == RunStatus.PARTIAL
-    assert search.queries == ["列出 Acme 价格"]
+    assert search.queries == ["Acme 价格 费用 收费"]
     assert fetcher.requested == [good, bad]
     assert repository.observations_for_task(task.id)[0].evidence
 
@@ -315,3 +315,18 @@ def test_missing_search_provider_blocks_discovery_without_network(
         RunStatus.COMPLETED if has_sources else RunStatus.BLOCKED
     )
     assert fetcher.requested == ([url] if has_sources else [])
+
+
+def test_browser_search_verification_reason_is_preserved(tmp_path) -> None:
+    class ChallengedSearch:
+        def search(self, query):
+            raise ProviderError("搜索网站要求验证码，请手动搜索后补充网址")
+
+    runner, repository, _ = setup_runner(tmp_path, FakeFetcher({}), ChallengedSearch())
+    task = repository.create_task(TaskSpec(raw_input="查公开资料"))
+    run = repository.create_run(task.id, task.latest_version.id)
+
+    runner.run(run.id)
+
+    assert repository.get_run(run.id).status == RunStatus.BLOCKED
+    assert "验证码" in repository.get_run(run.id).stop_reason

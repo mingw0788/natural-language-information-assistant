@@ -4,29 +4,31 @@
 
 状态说明：**已验证**＝关联测试通过且覆盖了所列行为；**部分覆盖**＝仅验证部分规则、接口或组件；**延期**＝属于首版范围外。
 
+按用户后续要求，当前默认模式调整为普通网页搜索（`browser`，必应默认、百度可选）和本地读取（`none`），不需要 API、密钥或云模型。搜索词仍联网发送到所选搜索网站。普通搜索页采用用户发起读取模式，不保证其搜索路径的自动访问许可；来源网页继续检查 robots 规则。验证码或访问限制会停止搜索并说明原因，不承诺所有网站可读。
+
 ## 功能需求
 
 | 编号 | 状态 | 测试或依据 |
 |---|---|---|
-| FR-001 | 部分覆盖 | `test_interpret_identifies_facts_lists_and_comparisons`、`test_multiple_urls_and_supplemental_text_are_preserved`、`test_create_direct_source_task_and_list_history`；自然语言解析有单元与 API 覆盖，尚无完整真实浏览器建任务验收。 |
-| FR-002 | 部分覆盖 | `test_interpret_does_not_infer_region_or_time_and_separates_conditions`、`test_home_page_is_local_app`；规则和页面存在，预览字段与假设的真实交互仅部分验证。 |
+| FR-001 | 部分覆盖 | `test_interpret_identifies_facts_lists_and_comparisons`、`test_search_query_keeps_subject_and_requested_details_without_request_filler`、`test_task_preview_returns_focused_search_terms_for_natural_language`；自然语言解析和搜索词整理有单元与 API 覆盖，尚无完整真实浏览器建任务验收。 |
+| FR-002 | 部分覆盖 | `test_interpret_does_not_infer_region_or_time_and_separates_conditions`、`test_home_page_is_local_app`、`test_task_preview_returns_focused_search_terms_for_natural_language`；页面会展示搜索词与服务缺失状态，真实浏览器交互仅部分验证。 |
 | FR-003 | 部分覆盖 | `test_same_name_without_identity_context_is_ambiguous`、`test_entity_resolution_merges_same_host_alias_and_separates_other_hosts`；支持保守区分同名实体；开放探索的代表性候选未完整验收。 |
 | FR-004 | 已验证 | `test_task_spec_keeps_required_and_preferred_conditions_separate`、`test_interpret_does_not_infer_region_or_time_and_separates_conditions`。 |
 | FR-005 | 部分覆盖 | `test_interpret_identifies_facts_lists_and_comparisons`、`test_optional_field_missing_keeps_entity_but_required_unknown_is_pending`；任务类型和部分停止判断有覆盖，三种交付的端到端质量尚未验收。 |
 | FR-006 | 部分覆盖 | `test_multiple_urls_and_supplemental_text_are_preserved`、`test_missing_search_configuration_is_reported_before_run`；多网址与材料归属有覆盖，严格唯一来源失败时不扩展来源的专门验收不足。 |
-| FR-007 | 部分覆盖 | `test_brave_search_maps_results_without_treating_snippet_as_evidence`、`test_search_snippets_are_only_leads_and_failed_source_is_partial`。 |
+| FR-007 | 部分覆盖 | `test_browser_search_queries_public_bing_page_and_extracts_organic_results`、`test_browser_search_parses_real_public_bing_fixture`、`test_browser_search_reports_challenge_pages_without_retrying`、`test_search_snippets_are_only_leads_and_failed_source_is_partial`；默认读取普通搜索页，真实公开页面保存样本覆盖结果解析，摘要仍只作为线索。验证码停止、补网址入口有覆盖；持续真实联网兼容性不作保证。可选 Brave/百度 API 另有适配器测试。 |
 | FR-008 | 部分覆盖 | `test_supplemental_search_is_bounded_and_stops_at_requested_count`、`test_search_and_supplement_rounds_have_a_hard_call_cap`；轮次和数量有硬限制，针对每个具体缺口的补搜策略未覆盖完整。 |
 | FR-009 | 部分覆盖 | `test_fetcher_reads_fixture_and_honors_robots_and_private_redirects`、`test_pdf_reader_reports_scan_without_ocr_as_unsupported`、`test_browser_renders_dynamic_text_and_blocks_private_subrequest`。 |
 | FR-010 | 部分覆盖 | `CollectionRunner` 对单来源最多读取 5 页；尚无重复分页内容和循环链接的专项集成用例。 |
 | FR-011 | 已验证 | `test_search_snippets_are_only_leads_and_failed_source_is_partial`、`test_fetcher_reads_fixture_and_honors_robots_and_private_redirects`。 |
-| FR-012 | 部分覆盖 | `test_model_observation_is_saved_only_with_exact_locatable_evidence`、`test_local_fallback_extracts_explicit_field_label_with_exact_span`；字段与证据可提取，复杂表格脚注等完整语义尚未验收。 |
+| FR-012 | 部分覆盖 | `test_model_observation_is_saved_only_with_exact_locatable_evidence`、`test_local_fallback_extracts_explicit_field_label_with_exact_span`；本地模式限于规则和明确字段格式，不具备完整语言模型能力。复杂理解、表格脚注等仍依赖可选模型且未全面验收。 |
 | FR-013 | 已验证 | `test_evidence_ref_requires_quote_matching_span_length`、`test_evidence_validator_requires_exact_snapshot_substring`、`test_runner_persists_exact_evidence_and_completes`。 |
 | FR-014 | 已验证 | `test_missing_value_is_not_coerced_to_zero`、`test_different_currency_or_period_is_not_ranked_as_comparable`。 |
 | FR-015 | 已验证 | `test_optional_field_missing_keeps_entity_but_required_unknown_is_pending`、`test_pdf_reader_reports_scan_without_ocr_as_unsupported`。 |
 | FR-016 | 部分覆盖 | `test_same_title_at_different_companies_is_not_merged`、`test_same_name_without_identity_context_is_ambiguous`、`test_entity_resolution_merges_same_host_alias_and_separates_other_hosts`；合并依据目前限于名称和来源主机，人工撤销合并尚未实现。 |
 | FR-017 | 已验证 | `test_conflict_keeps_both_values_and_collapses_syndicated_quote_support`。 |
 | FR-018 | 部分覆盖 | `test_optional_field_missing_keeps_entity_but_required_unknown_is_pending`、`test_required_free_condition_uses_evidence_and_explicit_negation`；有筛选理由，排序理由及完整推荐解释未覆盖。 |
-| FR-019 | 部分覆盖 | `test_runner_persists_exact_evidence_and_completes`、`test_pause_stops_before_dispatching_next_source`；结果逐来源持久化，真实界面长任务增量阅读体验只验证了选择与比较刷新。 |
+| FR-019 | 部分覆盖 | `test_runner_persists_exact_evidence_and_completes`、`test_pause_stops_before_dispatching_next_source`、`test_no_api_collection_exposes_source_text_without_model_extraction`、`test_source_excerpts_show_without_entities_and_cannot_inject_html`；`results.sources` 返回真实来源原文，未生成结构化实体时仍展示。长任务完整增量阅读体验未全面验收。 |
 | FR-020 | 部分覆盖 | `test_local_collection_results_correction_and_undo`、`test_result_selection_survives_refresh_and_comparison_is_side_by_side`；视图 API、排序、选择保持及并排比较有覆盖，四类计数与大结果集体验未完整验收。 |
 | FR-021 | 部分覆盖 | `test_message_view_filter_does_not_change_collection_spec`、`test_adding_display_field_creates_updated_spec_without_reinterpreting_scope`；常见展示调整有覆盖，其余自然语言操作短语仍需扩充。 |
 | FR-022 | 部分覆盖 | `test_local_collection_results_correction_and_undo`；字段修正和撤销有 API 覆盖，修正后必要条件重新评估及迟到来源冲突的完整场景未覆盖。 |
@@ -38,7 +40,7 @@
 | FR-028 | 延期 | P1：收藏、短名单和个人备注未实现。 |
 | FR-029 | 延期 | P1：长期偏好、模板及记忆管理未实现。 |
 | FR-030 | 部分覆盖 | `test_old_snapshots_are_removed_but_excerpt_is_retained_unverified`、`test_expired_derived_results_are_removed_after_180_days`、`test_explicit_task_material_deletion_can_keep_derived_quote`；保留和删除规则有服务测试，历史检索分页与手动保留入口未完整验收。 |
-| FR-031 | 部分覆盖 | `test_url_task_can_run_locally_without_search_or_model`、`test_discovery_task_reports_missing_search_before_start`、`test_missing_search_configuration_is_reported_before_run`。 |
+| FR-031 | 部分覆盖 | `test_discovery_defaults_to_no_api_web_search`、`test_default_search_and_local_reading_save_without_any_keys`、`test_no_api_collection_exposes_source_text_without_model_extraction`、`test_source_excerpts_show_without_entities_and_cannot_inject_html`；默认无密钥即可搜索并显示实际来源，不调用云模型。选择需密钥的可选 API 时，仍由 `test_missing_search_configuration_is_reported_before_run` 检查缺失配置；公开网站持续可用性与复杂提取质量未全面验收。 |
 | FR-032 | 已验证 | `test_provider_settings_never_return_secret_and_require_csrf`、`test_foreign_host_and_origin_are_rejected`、`test_url_policy_rejects_non_web_and_non_public_targets`、`test_dns_result_is_pinned_and_private_answer_is_rejected`、`test_browser_renders_dynamic_text_and_blocks_private_subrequest`（本机 Edge/Chromium）。 |
 | FR-033 | 部分覆盖 | `test_runner_persists_exact_evidence_and_completes`、`test_recovery_preserves_progress_and_does_not_redispatch_uncertain_source`；状态事件有覆盖，通知节制和用户可理解性未做正式可用性验收。 |
 | FR-034 | 延期 | P1 自动更新和自动差异报告延期；按用户要求新建一轮查询可用 `start_run` API，复用 FR-023 测试。 |
@@ -55,9 +57,9 @@
 | NFR-04 | 已验证 | `test_snapshot_and_observation_write_are_idempotent`、`test_recovery_preserves_progress_and_does_not_redispatch_uncertain_source`、`test_pause_and_restart_do_not_reset_the_active_time_budget`。 |
 | NFR-05 | 部分覆盖 | `test_optional_field_missing_keeps_entity_but_required_unknown_is_pending`、`test_runner_persists_exact_evidence_and_completes`；理由和事件可见，完整停止原因可读性未做用户验收。 |
 | NFR-06 | 已验证 | 凭据脱敏、CSRF/Host/Origin、URL/DNS、浏览器子请求和公式注入相关测试见 FR-027、FR-032。 |
-| NFR-07 | 部分覆盖 | `test_provider_metadata_is_persisted_without_secrets`、`test_provider_settings_never_return_secret_and_require_csrf`、`test_discovery_task_reports_missing_search_before_start`。 |
+| NFR-07 | 部分覆盖 | `test_default_search_and_local_reading_save_without_any_keys`、`test_switching_search_does_not_reuse_another_services_key`、`test_provider_metadata_is_persisted_without_secrets`、`test_provider_settings_never_return_secret_and_require_csrf`；默认不需要凭据，可选服务的密钥隔离及脱敏有覆盖。 |
 | NFR-08 | 部分覆盖 | `test_settings_and_history_pages_render_for_narrow_viewports` 与 `test_result_selection_survives_refresh_and_comparison_is_side_by_side`；语义控件、可见状态已采用，键盘和读屏专项验收未完成。 |
-| NFR-09 | 部分覆盖 | provider、URL、PDF 和动态网页 fixtures 已覆盖代表性边界；真实网站改版适配不在自动测试范围。 |
+| NFR-09 | 部分覆盖 | provider、URL、PDF、动态网页与 `tests/fixtures/bing_search_public.html` 真实公开页保存样本覆盖代表性边界；`test_browser_search_parses_real_public_bing_fixture` 检查实际页面结构，网站将来改版适配不在样本保证范围。 |
 | NFR-10 | 已验证 | `test_only_one_run_can_be_active_and_pause_resume_persist`；本地调度单个主动运行。 |
 
 ## 验收场景
@@ -71,7 +73,7 @@
 | AC-05 | 部分覆盖 | `test_same_name_without_identity_context_is_ambiguous`、`test_entity_resolution_merges_same_host_alias_and_separates_other_hosts`；开放主题候选生成未验收。 |
 | AC-06 | 部分覆盖 | `test_multiple_urls_and_supplemental_text_are_preserved`；混合粘贴材料与运行中补充来源未完整验收。 |
 | AC-07 | 部分覆盖 | `test_missing_search_configuration_is_reported_before_run`；严格单一来源失败时的 UI 场景未单测。 |
-| AC-08 | 已验证 | `test_brave_search_maps_results_without_treating_snippet_as_evidence`、`test_search_snippets_are_only_leads_and_failed_source_is_partial`。 |
+| AC-08 | 已验证 | `test_brave_search_maps_results_without_treating_snippet_as_evidence`、`test_browser_search_parses_real_public_bing_fixture`、`test_search_snippets_are_only_leads_and_failed_source_is_partial`；搜索摘要仍不能替代实际来源正文。 |
 | AC-09 | 部分覆盖 | `test_supplemental_search_is_bounded_and_stops_at_requested_count`、`test_search_and_supplement_rounds_have_a_hard_call_cap`；无新增结果时的缺口说明未端到端验收。 |
 | AC-10 | 部分覆盖 | `test_pdf_reader_reports_scan_without_ocr_as_unsupported`、`test_browser_renders_dynamic_text_and_blocks_private_subrequest`、`test_fetcher_reads_fixture_and_honors_robots_and_private_redirects`；混合来源单轮场景未覆盖。 |
 | AC-11 | 部分覆盖 | 单来源最多 5 页的实现；尚无重复分页循环 fixture。 |
@@ -90,7 +92,7 @@
 | AC-24 | 部分覆盖 | `test_model_provider_requests_schema_json_and_parses_usage`；价格未知时的页面措辞和供应商账单核对未覆盖。 |
 | AC-25 | 部分覆盖 | `test_csv_escapes_formula_text_and_includes_trace_metadata`、`test_xlsx_uses_text_cells_and_formula_safety`、`test_json_and_markdown_are_auditable_and_export_is_recorded`；真实下载文件打开验收不足。 |
 | AC-26 | 部分覆盖 | `test_old_snapshots_are_removed_but_excerpt_is_retained_unverified`、`test_expired_derived_results_are_removed_after_180_days`、`test_explicit_task_material_deletion_can_keep_derived_quote`；共享快照引用和删除后的跨结果重判需进一步集成测试。 |
-| AC-27 | 已验证 | `test_discovery_task_reports_missing_search_before_start`、`test_missing_search_configuration_is_reported_before_run`。 |
+| AC-27 | 部分覆盖 | `test_discovery_defaults_to_no_api_web_search`、`test_default_search_and_local_reading_save_without_any_keys`、`test_missing_search_configuration_is_reported_before_run`、`test_browser_search_verification_reason_is_preserved`；默认免密钥可启动，可选 API 缺失配置提前提示，验证码停止原因保留；任意网站的完整用户流程未全面验收。 |
 | AC-28 | 已验证 | `test_url_policy_rejects_non_web_and_non_public_targets`、`test_dns_result_is_pinned_and_private_answer_is_rejected`、`test_browser_renders_dynamic_text_and_blocks_private_subrequest`、`test_provider_settings_never_return_secret_and_require_csrf`。 |
 | AC-29 | 部分覆盖 | `test_runner_persists_exact_evidence_and_completes`、`test_search_snippets_are_only_leads_and_failed_source_is_partial`；无进展时通知节制未做时间驱动的 UI 测试。 |
 | AC-30 | 延期 | P1 收藏和备注未实现。 |
@@ -104,6 +106,8 @@
 ## 当前已知验收缺口
 
 - 本轮自动化主要是单元、API 与局部浏览器交互测试；尚未覆盖 AC-01–29、AC-35–36 全部完整用户旅程。
+- 普通搜索页依赖网站公开页面结构，可能出现验证码、限流或改版；真实保存样本与一次联网读取不能保证未来可用。不绕过验证，可补网址继续。来源网页 robots 检查与普通搜索页用户发起读取模式分别实现。
+- 默认本地模式能展示实际来源原文，复杂自然语言理解和结构化提取仍有限；原文卡片不伪装成模型答案，也不参与实体比较。
 - 实体归并只使用规范名称和来源主机，遇到跨站同名保守分列；尚无用户可撤销的合并管理界面。
 - 对象比较提供选中对象的字段并排、状态和证据链接；不做单位换算、数值排序或推荐排名。
 - 运行费用按请求与 Token 展示用量，不对供应商账单金额作精确封顶承诺。

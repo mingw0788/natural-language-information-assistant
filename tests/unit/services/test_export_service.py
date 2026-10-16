@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from info_assistant.domain.models import TaskField, TaskSpec
@@ -125,3 +126,124 @@ def test_json_and_markdown_are_auditable_and_export_is_recorded(tmp_path: Path) 
     with service.database.connection() as connection:
         count = connection.execute("SELECT COUNT(*) FROM exports").fetchone()[0]
     assert count == 2
+
+
+def sample_sources() -> list[dict]:
+    return [{
+        "snapshot_id": "snapshot-1",
+        "title": "Python 官方文档",
+        "url": "https://docs.python.org/zh-cn/3/",
+        "excerpt": "这里是已读取的原文，尚未核实为结构化事实。",
+        "fetched_at": "2026-10-15T12:00:00Z",
+    }]
+
+
+@pytest.mark.parametrize("file_format", ["json", "markdown", "text", "csv", "xlsx"])
+def test_source_only_collection_exports_documents_without_inventing_entities(
+    tmp_path: Path, file_format: str
+) -> None:
+    service, task_id, version_id = make_export_service(tmp_path)
+    artifact = service.export(
+        task_id=task_id,
+        task_version_id=version_id,
+        run_id="source-run",
+        spec=TaskSpec(raw_input="找 Python 官方文档"),
+        records=[],
+        sources=sample_sources(),
+        format=file_format,
+    )
+
+    assert artifact.record_count == 1
+    if file_format == "json":
+        payload = json.loads(artifact.content)
+        assert payload["records"] == []
+        assert payload["sources"] == [{
+            "record_type": "source",
+            "title": "Python 官方文档",
+            "url": "https://docs.python.org/zh-cn/3/",
+            "excerpt": "这里是已读取的原文，尚未核实为结构化事实。",
+            "fetched_at": "2026-10-15T12:00:00Z",
+        }]
+        assert payload["metadata"]["source_count"] == 1
+    elif file_format in {"csv", "xlsx"}:
+        if file_format == "csv":
+            rows = list(csv.DictReader(io.StringIO(artifact.content.decode("utf-8-sig"))))
+        else:
+            sheet = load_workbook(io.BytesIO(artifact.content))["结果"]
+            values = list(sheet.values)
+            rows = [dict(zip(values[0], row, strict=True)) for row in values[1:]]
+        assert len(rows) == 1
+        assert rows[0]["record_type"] == "source"
+        assert rows[0]["title"] == "Python 官方文档"
+        assert rows[0]["url"] == "https://docs.python.org/zh-cn/3/"
+        assert rows[0]["excerpt"] == "这里是已读取的原文，尚未核实为结构化事实。"
+        assert rows[0]["fetched_at"] == "2026-10-15T12:00:00Z"
+        assert not rows[0]["entity_id"]
+        assert not rows[0]["value"]
+        assert rows[0]["status"] != "confirmed"
+    else:
+        text = artifact.content.decode("utf-8")
+        assert "来源文档" in text
+        assert "record_type=source" in text
+        for key in ("title", "url", "excerpt", "fetched_at"):
+            assert sample_sources()[0][key] in text
+    with service.database.connection() as connection:
+        row_count = connection.execute(
+            "SELECT record_count FROM exports WHERE id=?", (artifact.export_id,)
+        ).fetchone()[0]
+    assert row_count == 1
+
+
+@pytest.mark.parametrize("selection", [
+    {"view": "confirmed"},
+    {"view": "pending_review"},
+    {"selected_entity_ids": []},
+    {"selected_entity_ids": ["not-selected"]},
+    {"selected_fields": ["价格"]},
+])
+def test_source_fallback_does_not_override_entity_view_or_field_selection(
+    tmp_path: Path, selection: dict
+) -> None:
+    service, task_id, version_id = make_export_service(tmp_path)
+    artifact = service.export(
+        task_id=task_id, task_version_id=version_id, run_id="source-run",
+        spec=TaskSpec(raw_input="查价格"), records=[], sources=sample_sources(),
+        format="json", **selection,
+    )
+    payload = json.loads(artifact.content)
+    assert payload["sources"] == []
+    assert payload["metadata"]["source_count"] == 0
+    assert artifact.record_count == 0
+
+
+def test_source_fallback_does_not_mix_documents_into_structured_export(tmp_path: Path) -> None:
+    service, task_id, version_id = make_export_service(tmp_path)
+    artifact = service.export(
+        task_id=task_id, task_version_id=version_id, run_id="source-run",
+        spec=TaskSpec(raw_input="查价格"), records=sample_records(), sources=sample_sources(),
+        format="json",
+    )
+    payload = json.loads(artifact.content)
+    assert payload["sources"] == []
+    assert payload["records"] == sample_records()
+    assert artifact.record_count == 1
+
+
+@pytest.mark.parametrize("file_format", ["csv", "xlsx"])
+def test_source_document_spreadsheet_cells_escape_formula_text(
+    tmp_path: Path, file_format: str
+) -> None:
+    service, task_id, version_id = make_export_service(tmp_path)
+    sources = [{**sample_sources()[0], "title": "=1+1", "excerpt": "+cmd|' /C calc'!A0"}]
+    artifact = service.export(
+        task_id=task_id, task_version_id=version_id, run_id="source-run",
+        spec=TaskSpec(raw_input="读取资料"), records=[], sources=sources, format=file_format,
+    )
+    if file_format == "csv":
+        row = next(csv.DictReader(io.StringIO(artifact.content.decode("utf-8-sig"))))
+    else:
+        sheet = load_workbook(io.BytesIO(artifact.content), data_only=False)["结果"]
+        row = dict(zip(next(sheet.values), list(sheet.values)[1], strict=True))
+        assert all(cell.data_type != "f" for cell in sheet[2])
+    assert row["title"] == "'=1+1"
+    assert row["excerpt"] == "'+cmd|' /C calc'!A0"

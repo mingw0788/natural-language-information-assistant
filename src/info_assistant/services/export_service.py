@@ -33,6 +33,11 @@ HEADERS = [
     "source_urls",
     "source_quotes",
     "conditions_and_limits",
+    "record_type",
+    "title",
+    "url",
+    "excerpt",
+    "fetched_at",
 ]
 
 
@@ -61,6 +66,7 @@ class ExportService:
         view: str = "all",
         selected_entity_ids: list[str] | None = None,
         selected_fields: list[str] | None = None,
+        sources: list[dict] | None = None,
     ) -> ExportArtifact:
         file_format = format.strip().lower()
         if file_format not in FORMATS:
@@ -79,6 +85,18 @@ class ExportService:
             if selected_field_set and not selected_observations:
                 continue
             filtered.append({**record, "observations": selected_observations})
+        source_records = []
+        if not records and view == "all" and selected_entities is None and not selected_field_set:
+            source_records = [
+                {
+                    "record_type": "source",
+                    **{
+                        key: str(source.get(key) or "")
+                        for key in ("title", "url", "excerpt", "fetched_at")
+                    },
+                }
+                for source in sources or []
+            ]
         generated_at = datetime.now(UTC).isoformat()
         metadata = {
             "task_id": task_id,
@@ -102,6 +120,7 @@ class ExportService:
                 sorted(selected_entities) if selected_entities is not None else None
             ),
             "selected_fields": sorted(selected_field_set) if selected_field_set else None,
+            "source_count": len(source_records),
             "limitations": [
                 "搜索摘要只作为线索；导出的来源摘录来自已保存的来源快照。",
                 "结果可能部分完成；未知字段不会自动当作不存在。",
@@ -118,6 +137,21 @@ class ExportService:
             spec,
             selected_field_set,
         )
+        if source_records:
+            metadata["limitations"].append("来源文档尚未作结构化核实，不计入正式结果数量。")
+            rows.extend(
+                {
+                    "task_id": task_id,
+                    "task_version_id": task_version_id,
+                    "run_id": run_id or "",
+                    "generated_at": generated_at,
+                    "view": view,
+                    "status": "source_only",
+                    "conditions_and_limits": "来源文档尚未作结构化核实，不计入正式结果数量。",
+                    **source,
+                }
+                for source in source_records
+            )
         metadata["record_count"] = len(rows)
         if file_format == "csv":
             content = self._csv(rows)
@@ -129,7 +163,8 @@ class ExportService:
             extension = "xlsx"
         elif file_format == "json":
             content = json.dumps(
-                {"metadata": metadata, "records": filtered}, ensure_ascii=False, indent=2
+                {"metadata": metadata, "records": filtered, "sources": source_records},
+                ensure_ascii=False, indent=2,
             ).encode("utf-8")
             content_type = "application/json; charset=utf-8"
             extension = "json"
@@ -218,6 +253,7 @@ class ExportService:
                     "source_urls": "；".join(item.get("url", "") or "" for item in evidence),
                     "source_quotes": "\n---\n".join(item.get("quote", "") for item in evidence),
                     "conditions_and_limits": "；".join(conditions),
+                    "record_type": "observation",
                 }
                 rows.append(row)
         return rows
@@ -261,6 +297,7 @@ class ExportService:
             "time_window",
             "stop_conditions",
             "limitations",
+            "source_count",
         ]
         for key in meta_keys:
             value = metadata.get(key)
@@ -315,23 +352,30 @@ class ExportService:
                 or "无额外说明"
             ),
             "",
-            "| 对象 | 字段 | 值 | 状态 | 来源摘录 | 来源链接 |",
-            "| --- | --- | --- | --- | --- | --- |",
         ]
+        if metadata["source_count"]:
+            lines.extend([
+                "## 来源文档（record_type=source）",
+                "",
+                "来源文档尚未作结构化核实，不计入正式结果数量。",
+                "",
+                "| 标题 | 来源链接 | 原文摘录 | 读取时间 |",
+                "| --- | --- | --- | --- |",
+            ])
+        else:
+            lines.extend([
+                "| 对象 | 字段 | 值 | 状态 | 来源摘录 | 来源链接 |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ])
         for row in rows:
+            keys = (
+                ("title", "url", "excerpt", "fetched_at")
+                if row["record_type"] == "source"
+                else ("entity", "field", "value", "status", "source_quotes", "source_urls")
+            )
             lines.append(
                 "| "
-                + " | ".join(
-                    escape(row[key])
-                    for key in (
-                        "entity",
-                        "field",
-                        "value",
-                        "status",
-                        "source_quotes",
-                        "source_urls",
-                    )
-                )
+                + " | ".join(escape(row[key]) for key in keys)
                 + " |"
             )
         lines.extend(["", "搜索摘要只作为线索；结果可能部分完成，未知字段不会自动当作不存在。"])
@@ -348,6 +392,16 @@ class ExportService:
             "",
         ]
         for row in rows:
+            if row["record_type"] == "source":
+                lines.extend([
+                    "来源文档（record_type=source，尚未作结构化核实）",
+                    f"标题：{row['title']}",
+                    f"来源：{row['url']}",
+                    f"读取时间：{row['fetched_at']}",
+                    f"原文摘录：{row['excerpt']}",
+                    "",
+                ])
+                continue
             lines.append(f"{row['entity']} · {row['field']}：{row['value']} [{row['status']}]")
             if row["source_quotes"]:
                 lines.append(f"来源摘录：{row['source_quotes']}")

@@ -43,6 +43,12 @@ class ResultEvaluator:
         pending = False
         excluded = False
 
+        if spec.time_window is not None:
+            # Observations currently have no validated publication-date evidence contract.
+            # Retrieval/observation timestamps and search date filters cannot establish it.
+            pending = True
+            reasons.append("来源发布日期尚未核实，无法确认符合任务时间范围")
+
         by_field = {item.field_name.casefold(): item for item in observations}
         for field in spec.fields:
             if not field.required:

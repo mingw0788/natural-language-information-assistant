@@ -48,6 +48,7 @@
     const spec = task.spec;
     setText('preview-title', `第 ${task.version} 版 · ${spec.kind === 'list' ? '名单采集' : spec.kind === 'comparison' ? '比较任务' : spec.kind === 'fact' ? '事实查询' : '研究任务'}`);
     setText('preview-summary', spec.summary || spec.raw_input);
+    setText('preview-search-query', task.search_query || spec.summary || spec.raw_input);
     appendTextList(byId('preview-fields'), (spec.fields || []).map((field) => `${field.name}${field.required ? '（必需）' : ''}`));
     appendTextList(byId('preview-conditions'), (spec.required_conditions || []).map((item) => item.text));
     appendTextList(byId('preview-assumptions'), [...(spec.assumptions || []), ...(spec.stop_conditions || []), ...(spec.region ? [`地区：${spec.region}`] : []), ...(spec.time_window ? [`时间范围：${spec.time_window.label || `${spec.time_window.start} 至 ${spec.time_window.end}`}`] : [])]);
@@ -58,6 +59,8 @@
     if (capability.local_fallbacks?.length) notes.push(`本地处理：${capability.local_fallbacks.join('；')}`);
     setText('capability-box', notes.join('\n') || '任务可以开始。');
     appendTextList(byId('data-flow-list'), [...(capability.data_flow || []), '不会登录网站，不会运行来源中的指令或下载可执行文件。']);
+    const needsSearch = (capability.missing || []).some((item) => item.includes('搜索服务'));
+    show(byId('search-settings-link'), needsSearch);
     const start = byId('start-task');
     if (start) start.disabled = !capability.ready;
     const link = byId('task-link');
@@ -92,12 +95,54 @@
     const target = byId(targetId);
     if (!target) return;
     target.replaceChildren();
+    const sources = data.sources || [];
+    if (sources.length) {
+      const heading = document.createElement('h3');
+      heading.textContent = `已读取的网页（${sources.length}）`;
+      const explanation = document.createElement('p');
+      explanation.className = 'helper-text';
+      explanation.textContent = '下面是实际读取的网页原文片段，方便你查看出处。片段保留来源表述，请结合原文判断。';
+      target.append(heading, explanation);
+      sources.forEach((source) => {
+        const card = document.createElement('article');
+        card.className = 'result-card source-card';
+        const title = document.createElement('h3');
+        const label = source.title || source.url || '来源原文';
+        if (source.url?.startsWith('https://') || source.url?.startsWith('http://')) {
+          const link = document.createElement('a');
+          link.href = source.url;
+          link.textContent = label;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          title.append(link);
+        } else {
+          title.textContent = label;
+        }
+        const excerpt = document.createElement('p');
+        excerpt.className = 'source-excerpt';
+        excerpt.textContent = source.excerpt || '此来源没有可展示的原文片段。';
+        card.append(title, excerpt);
+        if (source.fetched_at) {
+          const date = document.createElement('p');
+          date.className = 'helper-text';
+          date.textContent = `读取时间：${source.fetched_at}`;
+          card.append(date);
+        }
+        target.append(card);
+      });
+    }
     if (!data.items?.length) {
       const empty = document.createElement('p');
       empty.className = 'helper-text';
-      empty.textContent = '当前视图还没有结果。采集失败时，失败原因会保留在进展记录中。';
+      empty.textContent = sources.length ? '暂未提取出符合字段要求的结构化结果，可以先查看上方网页原文。' : '当前视图还没有结果。采集失败时，失败原因会保留在进展记录中。';
       target.append(empty);
+      setText('selected-count', `已选 ${selectedResults.size} 个对象`);
       return;
+    }
+    if (sources.length) {
+      const heading = document.createElement('h3');
+      heading.textContent = '提取出的字段';
+      target.append(heading);
     }
     const sortOrder = byId('result-sort')?.value || 'name_asc';
     const statusOrder = { confirmed: 0, user_confirmed: 1, pending_review: 2, excluded: 3 };
@@ -511,33 +556,93 @@
       } else {
         setText('preview-title', `任务已更新为第 ${result.version.number} 版`);
         setText('preview-summary', result.version.spec.summary || result.version.spec.raw_input);
+        setText('preview-search-query', result.search_query || result.version.spec.summary || result.version.spec.raw_input);
         const capability = result.capability;
         setText('capability-box', capability.missing?.join('；') || '新版本可开始采集。');
+        show(byId('search-settings-link'), (capability.missing || []).some((item) => item.includes('搜索服务')));
         byId('start-task').disabled = !capability.ready;
         show(byId('task-preview'));
       }
     } catch (error) { setText('app-message', error.message); }
   });
 
-  byId('provider-form')?.addEventListener('submit', async (event) => {
+  const providerForm = byId('provider-form');
+  let configuredSearchProviders = new Set(JSON.parse(providerForm?.dataset.configuredSearchProviders || '[]'));
+  let savedModelPreset = providerForm?.dataset.modelPreset || 'none';
+  let savedModelConfigured = providerForm?.dataset.modelConfigured === 'true';
+  const searchLabels = { baidu: '百度搜索', brave: 'Brave Search' };
+  function renderProviderSelection() {
+    if (!providerForm) return;
+    const searchProvider = byId('search-provider').value;
+    const modelPreset = byId('model-preset').value;
+    const searchLabel = searchProvider === 'browser' ? (byId('browser-search-engine').value === 'baidu' ? '百度' : '必应') : searchLabels[searchProvider];
+    setText('search-state', searchProvider === 'browser' ? `${searchLabel}公开网页搜索，无需密钥，可以开始搜索` : `${searchLabel}${configuredSearchProviders.has(searchProvider) ? '已配置，可以自动发现网页' : '尚未配置；也可以直接提供网址或粘贴文字'}`);
+    setText('model-state', modelPreset === 'none' ? '本地读取，不使用云模型，无需密钥' : (savedModelConfigured && savedModelPreset === modelPreset ? '已配置' : '尚未配置；请填写该服务的密钥'));
+    show(byId('browser-search-help'), searchProvider === 'browser');
+    show(byId('search-key-fields'), searchProvider !== 'browser');
+    show(byId('baidu-search-help'), searchProvider === 'baidu');
+    show(byId('brave-search-help'), searchProvider === 'brave');
+    show(byId('zhipu-model-help'), modelPreset === 'zhipu_free');
+    show(byId('local-model-help'), modelPreset === 'none');
+    show(byId('model-key-fields'), modelPreset !== 'none');
+    show(byId('custom-model-fields'), modelPreset === 'custom');
+    ['model-base-url', 'model-name', 'model-json-mode'].forEach((id) => { byId(id).disabled = modelPreset !== 'custom'; });
+    setText('provider-data-flow', `搜索词会发送到${searchLabel}，并访问结果中的来源网站；${modelPreset === 'none' ? '网页正文在本机读取和保存，不发送给云模型' : `任务文字和选中的来源正文会发送到${modelPreset === 'zhipu_free' ? '智谱' : '你配置的模型服务'}`}。`);
+  }
+  byId('search-provider')?.addEventListener('change', () => {
+    byId('search-secret').value = '';
+    byId('clear-search').checked = false;
+    setText('settings-message', '');
+    renderProviderSelection();
+  });
+  byId('model-preset')?.addEventListener('change', () => {
+    byId('model-secret').value = '';
+    byId('clear-model').checked = false;
+    setText('settings-message', '');
+    renderProviderSelection();
+  });
+  byId('browser-search-engine')?.addEventListener('change', renderProviderSelection);
+  renderProviderSelection();
+
+  providerForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const body = {};
-    if (byId('search-secret').value) body.search_secret = byId('search-secret').value;
-    if (byId('clear-search').checked) body.search_secret = '';
+    const body = { search_provider: byId('search-provider').value };
+    if (body.search_provider === 'browser') {
+      body.browser_search_engine = byId('browser-search-engine').value;
+    } else {
+      if (byId('search-secret').value) body.search_secret = byId('search-secret').value;
+      if (byId('clear-search').checked) body.search_secret = '';
+    }
     const baseUrl = byId('model-base-url').value.trim();
     const modelName = byId('model-name').value.trim();
-    if (baseUrl || modelName) { body.model_base_url = baseUrl; body.model_name = modelName; }
-    if (byId('model-secret').value) body.model_secret = byId('model-secret').value;
-    body.clear_model = byId('clear-model').checked;
+    const preset = byId('model-preset').value;
+    if (preset === 'none' || preset === 'zhipu_free') {
+      body.model_preset = preset;
+    } else if (baseUrl || modelName || byId('model-secret').value) {
+      body.model_preset = preset;
+      body.model_base_url = baseUrl;
+      body.model_name = modelName;
+      body.model_json_mode = byId('model-json-mode').value;
+    }
+    if (preset !== 'none' && byId('model-secret').value) body.model_secret = byId('model-secret').value;
+    body.clear_model = preset === 'none' || byId('clear-model').checked;
     const message = byId('settings-message');
     try {
       const config = await api('/api/settings/providers', { method: 'PUT', body: JSON.stringify(body) });
-      setText('search-state', config.search_configured ? '已配置' : '尚未配置');
-      setText('model-state', config.model_configured ? '已配置' : '尚未配置');
+      configuredSearchProviders = new Set(config.configured_search_providers || []);
+      savedModelPreset = config.model_preset;
+      savedModelConfigured = config.model_configured;
+      byId('search-provider').value = config.search_provider;
+      byId('browser-search-engine').value = config.browser_search_engine || 'bing';
+      byId('model-preset').value = config.model_preset;
+      byId('model-base-url').value = config.model_base_url;
+      byId('model-name').value = config.model_name;
+      byId('model-json-mode').value = config.model_json_mode;
       byId('search-secret').value = '';
       byId('model-secret').value = '';
       byId('clear-search').checked = false;
       byId('clear-model').checked = false;
+      renderProviderSelection();
       message.textContent = '设置已保存。密钥不会再次显示。';
       message.className = 'success-text';
     } catch (error) {

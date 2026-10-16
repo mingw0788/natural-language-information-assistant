@@ -14,8 +14,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from info_assistant.providers.baidu_search import BaiduSearchProvider
 from info_assistant.providers.base import ModelProvider, SearchProvider
 from info_assistant.providers.brave_search import BraveSearchProvider
+from info_assistant.providers.browser_search import BrowserSearchProvider
 from info_assistant.providers.openai_compatible import OpenAICompatibleModelProvider
 from info_assistant.services.browser_reader import BrowserReader
 from info_assistant.services.budget_ledger import BudgetLedger
@@ -84,13 +86,27 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         browser_channel=config.browser_channel,
     )
     capability_checker = CapabilityChecker(provider_settings)
+
+    def configured_search_provider() -> SearchProvider:
+        if config.search_provider is not None:
+            return config.search_provider
+        current = provider_settings.public_settings()
+        if current.search_provider == "browser":
+            return BrowserSearchProvider(
+                fetcher, engine=current.browser_search_engine,
+                browser_channel=config.browser_channel,
+            )
+        if current.search_provider == "baidu":
+            return BaiduSearchProvider(credentials)
+        return BraveSearchProvider(credentials)
+
     runner = CollectionRunner(
         database=database,
         repository=repository,
         control=control,
         ledger=ledger,
         fetcher=fetcher,
-        search_provider=config.search_provider or BraveSearchProvider(credentials),
+        search_provider=configured_search_provider(),
         model_provider=config.model_provider,
         browser_reader=browser_reader,
         capability_checker=capability_checker,
@@ -137,12 +153,16 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         if config.model_provider is not None:
             runner.model_provider = config.model_provider
             return
-        current = provider_settings.public_settings()
+        current, secret = provider_settings.model_runtime_snapshot()
         if current.model_configured:
             runner.model_provider = OpenAICompatibleModelProvider(
                 current.model_base_url,
                 current.model_name,
                 credentials,
+                json_mode=current.model_json_mode,
+                disable_thinking=current.model_preset == "zhipu_free",
+                credential_snapshot=secret,
+                freeze_credentials=True,
             )
         else:
             runner.model_provider = None
@@ -152,6 +172,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             return
 
         def run_job() -> None:
+            runner.search_provider = configured_search_provider()
             prepare_model_provider()
             runner.run(run_id)
 

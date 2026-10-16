@@ -4,24 +4,30 @@
   <section class="hero">
     <p class="eyebrow">把问题变成有来源的答案</p>
     <h1>你想查什么？</h1>
-    <p class="intro">写下目标和条件。开始前先检查任务理解与所需服务；采集中的结果会逐步显示。</p>
+    <p class="intro">用自然语言说出你想找什么，系统会整理搜索词、查找网页并保留原文和出处。默认无需密钥，先查看搜索方案即可开始。</p>
     <div class="provider-strip" role="status">
       <span class="status-dot {{ 'ready' if providers.search_configured else 'waiting' }}"></span>
-      搜索：{{ '已配置' if providers.search_configured else '未配置' }}
-      <span class="status-dot {{ 'ready' if providers.model_configured else 'waiting' }}"></span>
-      模型提取：{{ '已配置' if providers.model_configured else '未配置，可先处理网址和粘贴文字' }}
+      联网搜索：{{ providers.search_provider_label }} · {{ '已配置' if providers.search_configured else '待配置' }}
+      <span class="status-dot {{ 'ready' if providers.model_configured or providers.model_preset == 'none' else 'waiting' }}"></span>
+      信息整理：{{ '已启用模型提取' if providers.model_configured else '本地读取，无需密钥' }}
     </div>
     {% if not providers.search_configured %}
-      <p class="notice">没有配置搜索服务时，仍可直接读取你提供的网址或粘贴文字。未配置的服务不会被调用。</p>
+      <p class="notice">自动发现网页需先配置{{ providers.search_provider_label }}密钥，设置中提供国内服务和免费额度说明。直接提供网址或粘贴文字，无需搜索密钥。<a href="/settings">前往设置</a> · <a href="{{ providers.search_signup_url }}" target="_blank" rel="noopener noreferrer">获取{{ providers.search_provider_label }}密钥</a></p>
+    {% elif providers.search_provider == 'browser' %}
+      <p class="helper-text">直接搜索公开网页，不调用付费搜索接口。搜索词会发送到所选搜索网站；搜索网站要求验证或限制访问时，会显示原因。<a href="/settings">更换搜索网站</a></p>
     {% endif %}
     <form id="task-form" class="task-form">
-      <label for="task-input">采集需求</label>
-      <textarea id="task-input" name="raw_input" rows="5" required maxlength="10000" placeholder="例如：比较这三家公司的免费套餐，列出价格、限制和官方来源……"></textarea>
-      <label for="source-input">补充网址或文字（可选，每个网址单独一行）</label>
-      <textarea id="source-input" name="supplemental_material" rows="3" maxlength="100000" placeholder="https://example.com/pricing&#10;也可以粘贴你希望一起分析的文字"></textarea>
+      <label for="task-input">用自然语言描述你要找什么</label>
+      <textarea id="task-input" name="raw_input" rows="4" required maxlength="10000" placeholder="例如：帮我比较 Notion、飞书和 Trello 的免费版，列出价格、存储限制和官方链接"></textarea>
+      <p class="helper-text">可以模糊描述；尽量写清对象、地区、时间和想了解的内容。系统会展示整理后的搜索词，方便你检查。</p>
+      <details class="supplemental-input">
+        <summary>补充网址或文字（可选）</summary>
+        <label for="source-input">网址可每行一个，也可以粘贴希望一起分析的文字</label>
+        <textarea id="source-input" name="supplemental_material" rows="3" maxlength="100000" placeholder="https://example.com/pricing&#10;也可以粘贴你希望一起分析的文字"></textarea>
+      </details>
       <div class="form-actions">
         <p class="helper-text">仅读取公开网页和文字 PDF；不会登录网站、绕过访问控制或执行网页中的操作。</p>
-        <button type="submit" class="primary-button">检查任务条件</button>
+        <button type="submit" class="primary-button">分析需求并查看方案</button>
       </div>
     </form>
   </section>
@@ -34,10 +40,13 @@
     <div id="capability-box" class="notice" role="status"></div>
     <div class="explanation-grid">
       <div><h3>会采集什么</h3><p id="preview-summary"></p></div>
+      <div><h3>整理后的搜索词</h3><p id="preview-search-query"></p></div>
       <div><h3>字段</h3><ul id="preview-fields"></ul></div>
       <div><h3>必要条件</h3><ul id="preview-conditions"></ul></div>
       <div><h3>默认与限制</h3><ul id="preview-assumptions"></ul></div>
     </div>
+    <p class="helper-text">如果搜索词不准确，点“返回修改”补充对象名称或条件后再检查。</p>
+    <p><a id="search-settings-link" class="secondary-link hidden" href="/settings">配置联网搜索</a></p>
     <details class="data-flow-details">
       <summary>查看数据流与服务说明</summary>
       <ul id="data-flow-list"></ul>
@@ -66,7 +75,7 @@
       </div>
     </div>
     <section class="results-section">
-      <div class="section-heading"><div><p class="eyebrow">已保存结果</p><h2>核对来源与结论</h2></div>
+      <div class="section-heading"><div><p class="eyebrow">已保存结果</p><h2>查看网页原文与提取结果</h2></div>
         <div class="result-tools">
           <label class="filter-label">显示
             <select id="result-filter">

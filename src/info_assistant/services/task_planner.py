@@ -22,6 +22,57 @@ FIELD_TERMS = (
     (("优点", "优势", "pros"), "优点"),
     (("缺点", "劣势", "cons"), "缺点"),
     (("地点", "城市", "location"), "地点"),
+    (("适用面积", "覆盖面积", "面积", "coverage area"), "适用面积"),
+    (("滤芯成本", "滤芯价格", "滤网成本", "滤网价格", "耗材成本", "耗材价格"), "滤芯成本"),
+    (("耗电量", "功耗", "能耗", "power consumption"), "耗电量"),
+    (("保修期", "质保期", "保修", "质保", "warranty"), "保修期"),
+)
+SEARCH_FIELD_EXPANSIONS = {
+    "价格": ("费用", "收费"),
+    "限制": ("条件", "额度"),
+    "来源": ("官网", "官方来源"),
+    "发布日期": ("发布时间", "更新时间"),
+    "优点": ("优势",),
+    "缺点": ("劣势",),
+    "适用面积": ("覆盖面积",),
+    "滤芯成本": ("滤芯价格", "耗材成本"),
+    "耗电量": ("功耗", "能耗"),
+    "保修期": ("质保期",),
+}
+SEARCH_LEADING_FILLERS = (
+    "麻烦帮我",
+    "烦请帮我",
+    "请帮我",
+    "我想了解",
+    "我想查询",
+    "我想查找",
+    "我想搜索",
+    "我想找",
+    "我想查",
+    "我想要",
+    "我需要",
+    "请问",
+    "帮忙",
+    "帮我",
+    "麻烦",
+    "烦请",
+    "请",
+    "找一下",
+    "查找一下",
+    "查询一下",
+    "搜索一下",
+    "查一下",
+    "搜一下",
+    "列出",
+    "比较一下",
+    "对比一下",
+    "比较",
+    "对比",
+    "搜索",
+    "查询",
+    "查找",
+    "找",
+    "查",
 )
 
 
@@ -35,6 +86,36 @@ class TaskChange:
 
 
 class TaskPlanner:
+    @staticmethod
+    def build_search_query(spec: TaskSpec) -> str:
+        """Prepare focused search terms while leaving task interpretation untouched."""
+        text = URL_PATTERN.sub(" ", spec.summary or spec.raw_input).strip()
+        leading_fillers = sorted(SEARCH_LEADING_FILLERS, key=len, reverse=True)
+        while text:
+            for filler in leading_fillers:
+                if text.startswith(filler):
+                    text = text[len(filler) :].lstrip(" \t，,。:：")
+                    break
+            else:
+                break
+
+        text = re.sub(
+            r"(?:请帮我|帮我|帮忙|优先使用|优先引用|优先|最好使用|最好引用|最好|比较一下|对比一下|比较|对比|分别列出|列出)",
+            " ",
+            text,
+        )
+        text = re.sub(r"[，,。；;：:！？?、\r\n]+", " ", text)
+        terms = " ".join(text.split())
+        lower_terms = terms.casefold()
+        for field in spec.fields:
+            for related_term in SEARCH_FIELD_EXPANSIONS.get(field.name, (field.name,)):
+                if related_term.casefold() not in lower_terms:
+                    terms = f"{terms} {related_term}".strip()
+                    lower_terms = terms.casefold()
+        if not terms:
+            terms = spec.raw_input.strip()
+        return terms[:1_000]
+
     def interpret(
         self,
         raw_input: str,

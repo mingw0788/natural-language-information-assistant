@@ -1,12 +1,17 @@
+from datetime import UTC, datetime
+
 from info_assistant.domain.enums import ObservationStatus, TaskKind, ValueOrigin
 from info_assistant.domain.models import (
     Condition,
     EvidenceRef,
     Observation,
+    SourceSnapshot,
     TaskField,
     TaskSpec,
 )
+from info_assistant.services.extractor import Extractor
 from info_assistant.services.result_evaluator import ResultEvaluator, compare_observations
+from info_assistant.services.task_planner import TaskPlanner
 
 
 def observation(field: str, value: str | None, quote: str | None = None) -> Observation:
@@ -74,3 +79,43 @@ def test_different_currency_or_period_is_not_ranked_as_comparable() -> None:
 
     assert comparison.comparable is False
     assert "币种" in comparison.reason
+
+
+def test_recent_product_price_is_pending_when_source_publication_date_is_unknown() -> None:
+    now = datetime(2026, 10, 15, 8, tzinfo=UTC)
+    spec = TaskPlanner().interpret("查最近的产品价格", now=now)
+    snapshot = SourceSnapshot(
+        source_id="product-page",
+        run_id="test-run",
+        text="产品甲\n价格：10元",
+        fetched_at=now,
+    )
+    observations = Extractor().extract(spec, snapshot)
+
+    result = ResultEvaluator().evaluate(spec, "产品甲", observations)
+
+    assert spec.time_window is not None
+    assert spec.required_conditions == []
+    assert observations[0].status == ObservationStatus.CONFIRMED
+    assert result.status == "pending_review"
+    assert result.official_count_eligible is False
+    assert "发布日期" in " ".join(result.reasons)
+    assert "时间范围" in " ".join(result.reasons)
+
+
+def test_observation_timestamps_and_unverified_date_claims_do_not_satisfy_time_window() -> None:
+    now = datetime(2026, 10, 15, 8, tzinfo=UTC)
+    spec = TaskPlanner().interpret("查最近的产品价格", now=now)
+    price = observation("价格", "10元", "10元").model_copy(
+        update={
+            "observed_at": now,
+            "qualifiers": ["最近7天", "发布日期：2026-10-14"],
+            "metadata": {"published_at": "2026-10-14", "fetched_at": now.isoformat()},
+        }
+    )
+
+    result = ResultEvaluator().evaluate(spec, "产品甲", [price])
+
+    assert result.status == "pending_review"
+    assert result.official_count_eligible is False
+    assert "发布日期" in " ".join(result.reasons)

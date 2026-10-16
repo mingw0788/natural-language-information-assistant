@@ -3,27 +3,73 @@
 {% block content %}
   <section class="hero compact-hero">
     <p class="eyebrow">连接由你选择</p><h1>服务设置</h1>
-    <p class="intro">搜索服务用于发现来源；模型服务用于按字段提取。API 密钥只存入 Windows 凭据管理器，页面不会再次显示密钥。</p>
+    <p class="intro">默认直接搜索公开网页，无需申请密钥。用本地方式读取网页和整理来源；如果需要更复杂的字段提取，也可以自选国内模型服务。</p>
   </section>
   <section class="panel settings-panel">
-    <form id="provider-form">
-      <fieldset><legend>Brave 搜索</legend>
-        <p id="search-state" class="helper-text">{{ '已配置' if providers.search_configured else '尚未配置' }}</p>
-        <label for="search-secret">API 密钥</label>
-        <input id="search-secret" type="password" autocomplete="new-password" maxlength="10000" placeholder="留空则保持现有设置">
-        <label class="checkbox-label"><input id="clear-search" type="checkbox"> 删除已保存的搜索密钥</label>
+    <form id="provider-form" data-configured-search-providers='{{ providers.configured_search_providers | default(['browser']) | tojson }}' data-model-preset="{{ providers.model_preset | default('none') }}" data-model-configured="{{ 'true' if providers.model_configured else 'false' }}">
+      <fieldset><legend>联网搜索</legend>
+        <label for="search-provider">搜索服务</label>
+        <select id="search-provider">
+          <option value="browser" {{ 'selected' if providers.search_provider | default('browser') == 'browser' else '' }}>公开网页搜索 · 无需密钥（默认）</option>
+          <option value="baidu" {{ 'selected' if providers.search_provider == 'baidu' else '' }}>可选：百度搜索 API · 国内，提供免费额度</option>
+          <option value="brave" {{ 'selected' if providers.search_provider == 'brave' else '' }}>可选：Brave Search API</option>
+        </select>
+        <p id="search-state" class="helper-text">{{ providers.search_provider_label }}{{ '已配置，可以自动发现网页' if providers.search_configured else '尚未配置；也可以直接提供网址或粘贴文字' }}</p>
+        <div id="browser-search-help" class="{{ 'hidden' if providers.search_provider | default('browser') != 'browser' else '' }}">
+          <label for="browser-search-engine">搜索网站</label>
+          <select id="browser-search-engine">
+            <option value="bing" {{ 'selected' if providers.browser_search_engine | default('bing') == 'bing' else '' }}>必应（默认）</option>
+            <option value="baidu" {{ 'selected' if providers.browser_search_engine == 'baidu' else '' }}>百度（国内）</option>
+          </select>
+          <p class="helper-text">读取普通搜索结果页面，不需要搜索 API 或密钥。搜索词仍会发送到你选的网站。网站出现安全验证或限制访问时，会显示原因，采集可能中断。</p>
+        </div>
+        <div id="baidu-search-help" class="{{ 'hidden' if providers.search_provider != 'baidu' else '' }}">
+          <p class="helper-text">百度搜索 API 当前每天提供 100 次免费调用。本应用每日最多发起 60 次搜索请求；你的账户实际余量以百度控制台为准，其他应用也可能消耗额度。</p>
+          <ol class="helper-text"><li>注册或登录百度智能云，按官方指引开通百度搜索 API。</li><li>创建 API Key，粘贴到下方并保存。</li><li>只打算使用免费额度时，请勿启用超额后付费。免费政策以平台最新规则为准。</li></ol>
+          <p class="helper-text"><a href="https://ai.baidu.com/ai-doc/AppBuilder/pmaxd1hvy" target="_blank" rel="noopener noreferrer">百度搜索 API 官方开通与免费额度说明</a></p>
+        </div>
+        <p id="brave-search-help" class="helper-text {{ 'hidden' if providers.search_provider != 'brave' else '' }}">在 <a href="https://brave.com/search/api/" target="_blank" rel="noopener noreferrer">Brave Search API 官方页面</a>创建密钥，额度与价格以平台为准。</p>
+        <div id="search-key-fields" class="{{ 'hidden' if providers.search_provider | default('browser') == 'browser' else '' }}">
+          <label for="search-secret">API 密钥</label>
+          <input id="search-secret" type="password" autocomplete="new-password" maxlength="10000" placeholder="留空则保持现有设置">
+          <label class="checkbox-label"><input id="clear-search" type="checkbox"> 删除当前所选搜索服务的密钥</label>
+          <p class="helper-text">API 密钥只存入 Windows 凭据管理器，页面不会再次显示。</p>
+        </div>
       </fieldset>
-      <fieldset><legend>OpenAI 兼容模型服务</legend>
-        <p id="model-state" class="helper-text">{{ '已配置' if providers.model_configured else '尚未配置' }}</p>
-        <label for="model-base-url">服务地址</label>
-        <input id="model-base-url" type="url" maxlength="2000" value="{{ providers.model_base_url }}" placeholder="https://api.example.com/v1">
-        <label for="model-name">模型名称</label>
-        <input id="model-name" maxlength="200" value="{{ providers.model_name }}" placeholder="例如 deepseek-chat">
-        <label for="model-secret">API 密钥</label>
-        <input id="model-secret" type="password" autocomplete="new-password" maxlength="10000" placeholder="留空则保持现有密钥">
-        <label class="checkbox-label"><input id="clear-model" type="checkbox"> 删除已保存的模型配置和密钥</label>
+      <fieldset><legend>信息提取模型（可选）</legend>
+        <p class="helper-text">本地模式可搜索、读取网页、展示原文和出处。云模型可帮助整理复杂字段，属于可选增强。</p>
+        <label for="model-preset">模型服务</label>
+        <select id="model-preset">
+          <option value="none" {{ 'selected' if providers.model_preset | default('none') == 'none' else '' }}>本地读取 · 不使用云模型（默认，无需密钥）</option>
+          <option value="zhipu_free" {{ 'selected' if providers.model_preset == 'zhipu_free' else '' }}>可选：智谱 GLM-4.7-Flash · 国内免费模型</option>
+          <option value="custom" {{ 'selected' if providers.model_preset == 'custom' else '' }}>自定义服务</option>
+        </select>
+        <p id="model-state" class="helper-text">{{ '本地读取，不使用云模型，无需密钥' if providers.model_preset | default('none') == 'none' else ('已配置' if providers.model_configured else '尚未配置') }}</p>
+        <p id="local-model-help" class="helper-text {{ 'hidden' if providers.model_preset | default('none') != 'none' else '' }}">正文与来源在本机保存和查看，不发送给云模型。提取不出的字段会保留为空；保存此模式会清除已保存的云模型配置和密钥。</p>
+        <div id="zhipu-model-help" class="{{ 'hidden' if providers.model_preset != 'zhipu_free' else '' }}">
+          <p class="helper-text">GLM-4.7-Flash 当前输入和输出均免费，仍需注册智谱开放平台并创建 API Key。保存时会自动填写服务地址和模型名；速率限制与免费政策以平台为准。</p>
+          <p class="helper-text"><a href="https://open.bigmodel.cn/" target="_blank" rel="noopener noreferrer">前往智谱开放平台获取密钥</a> · <a href="https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash" target="_blank" rel="noopener noreferrer">免费模型说明</a></p>
+        </div>
+        <div id="custom-model-fields" class="{{ 'hidden' if providers.model_preset != 'custom' else '' }}">
+          <label for="model-base-url">服务地址</label>
+          <input id="model-base-url" type="url" maxlength="2000" value="{{ providers.model_base_url }}" placeholder="服务商提供的 API 地址">
+          <label for="model-name">模型名称</label>
+          <input id="model-name" maxlength="200" value="{{ providers.model_name }}" placeholder="例如 deepseek-chat">
+          <label for="model-json-mode">结果格式</label>
+          <select id="model-json-mode">
+            <option value="json_object" {{ 'selected' if providers.model_json_mode == 'json_object' else '' }}>JSON（多数兼容服务适用）</option>
+            <option value="json_schema" {{ 'selected' if providers.model_json_mode == 'json_schema' else '' }}>严格 JSON Schema（需服务支持）</option>
+          </select>
+          <p class="helper-text">可填写国内服务或本机兼容接口。更换服务地址时，请填写对应服务的新密钥。</p>
+        </div>
+        <div id="model-key-fields" class="{{ 'hidden' if providers.model_preset | default('none') == 'none' else '' }}">
+          <label for="model-secret">API 密钥</label>
+          <input id="model-secret" type="password" autocomplete="new-password" maxlength="10000" placeholder="留空则保持现有密钥">
+          <label class="checkbox-label"><input id="clear-model" type="checkbox"> 删除已保存的模型配置和密钥</label>
+          <p class="helper-text">API 密钥只存入 Windows 凭据管理器，页面不会再次显示。</p>
+        </div>
       </fieldset>
-      <div class="form-actions"><p class="helper-text">任务文字和选中的来源正文会发送到已配置的模型服务；搜索词会发送到搜索服务。</p>
+      <div class="form-actions"><p id="provider-data-flow" class="helper-text">任务文字和选中的来源正文会发送到你选择的模型服务；自动搜索时，搜索词会发送到所选搜索服务。</p>
         <button class="primary-button" type="submit">保存设置</button></div>
       <p id="settings-message" role="status"></p>
     </form>

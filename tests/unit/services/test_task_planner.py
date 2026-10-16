@@ -54,6 +54,39 @@ def test_multiple_urls_and_supplemental_text_are_preserved() -> None:
     assert "我关心月付价格" in task.pasted_material
 
 
+def test_search_query_keeps_subject_and_requested_details_without_request_filler() -> None:
+    task = TaskPlanner().interpret(
+        "请帮我找几款适合家庭的空气净化器，比较价格、适用面积和滤芯成本，优先使用官方来源",
+        NOW,
+    )
+    build_search_query = getattr(TaskPlanner, "build_search_query", None)
+
+    assert callable(build_search_query), "TaskPlanner must prepare natural-language search terms"
+    query = build_search_query(task)
+
+    assert "请帮我" not in query
+    assert "空气净化器" in query
+    assert "价格" in query
+    assert "适用面积" in query
+    assert "滤芯成本" in query
+    assert "官方来源" in query
+
+
+def test_interpret_extracts_common_product_comparison_fields() -> None:
+    task = TaskPlanner().interpret(
+        "请帮我比较空气净化器的价格、适用面积、滤芯成本、耗电量和保修期",
+        NOW,
+    )
+
+    assert {field.name for field in task.fields} >= {
+        "价格",
+        "适用面积",
+        "滤芯成本",
+        "耗电量",
+        "保修期",
+    }
+
+
 def test_message_view_filter_does_not_change_collection_spec() -> None:
     planner = TaskPlanner()
     current = planner.interpret("列出 8 个数据工具", NOW)

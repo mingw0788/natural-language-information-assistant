@@ -22,12 +22,22 @@ class OpenAICompatibleModelProvider:
         credentials: CredentialStore,
         client: httpx.Client | None = None,
         timeout_seconds: float = 90,
+        json_mode: str = "json_schema",
+        disable_thinking: bool = False,
+        credential_snapshot: str | None = None,
+        freeze_credentials: bool = False,
     ) -> None:
+        if json_mode not in {"json_schema", "json_object"}:
+            raise ValueError("不支持的 JSON 输出模式")
         self.base_url = validate_model_base_url(base_url)
         self.model = model
         self.credentials = credentials
         self.client = client
         self.timeout_seconds = timeout_seconds
+        self.json_mode = json_mode
+        self.disable_thinking = disable_thinking
+        self.credential_snapshot = credential_snapshot
+        self.freeze_credentials = freeze_credentials
 
     def generate_json(
         self,
@@ -36,12 +46,17 @@ class OpenAICompatibleModelProvider:
         input_text: str,
         budget: ModelCallBudget,
     ) -> ModelResult:
-        secret = self.credentials.get_secret("model-api")
+        secret = (
+            self.credential_snapshot
+            if self.freeze_credentials
+            else self.credentials.get_secret("model-api")
+        )
         if not secret:
             raise ProviderNotConfigured("模型服务尚未配置")
         body = {
             "model": self.model,
             "temperature": 0,
+            "stream": False,
             "max_tokens": max(1, budget.max_output_tokens),
             "response_format": {
                 "type": "json_schema",
@@ -59,6 +74,13 @@ class OpenAICompatibleModelProvider:
                 {"role": "user", "content": input_text},
             ],
         }
+        if self.json_mode == "json_object":
+            body["response_format"] = {"type": "json_object"}
+            body["messages"][0]["content"] += (
+                " Required JSON schema: " + json.dumps(schema, ensure_ascii=False)
+            )
+        if self.disable_thinking:
+            body["thinking"] = {"type": "disabled"}
         try:
             url = f"{self.base_url}/chat/completions"
             headers = {"Authorization": f"Bearer {secret}"}

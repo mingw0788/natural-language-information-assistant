@@ -30,10 +30,24 @@ def test_url_task_can_run_locally_without_search_or_model(tmp_path) -> None:
 def test_discovery_task_reports_missing_search_before_start(tmp_path) -> None:
     database = Database(tmp_path / "assistant.sqlite3")
     database.migrate()
-    checker = CapabilityChecker(ProviderSettingsStore(database, InMemoryCredentialStore()))
+    settings = ProviderSettingsStore(database, InMemoryCredentialStore())
+    settings.update_search(provider="baidu")
+    checker = CapabilityChecker(settings)
     task = TaskSpec(raw_input="列出十个公开的数据可视化工具", kind=TaskKind.LIST)
 
     report = checker.assess(task)
 
     assert report.ready is False
     assert "搜索服务" in report.missing[0]
+
+
+def test_discovery_defaults_to_no_api_web_search(tmp_path) -> None:
+    database = Database(tmp_path / "assistant.sqlite3")
+    database.migrate()
+    checker = CapabilityChecker(ProviderSettingsStore(database, InMemoryCredentialStore()))
+
+    report = checker.assess(TaskSpec(raw_input="查公开资料"))
+
+    assert report.ready is True
+    assert any("网页搜索" in item for item in report.available)
+    assert any("普通搜索页面" in item for item in report.data_flow)

@@ -112,6 +112,7 @@ def create_task(body: TaskCreateRequest, request: Request) -> dict:
         "id": task.id,
         "version": task.latest_version.number,
         "spec": _model_json(task.latest_version.spec),
+        "search_query": request.app.state.planner.build_search_query(spec),
         "capability": _model_json(_capability(request, spec)),
     }
 
@@ -126,6 +127,7 @@ def get_task(task_id: str, request: Request) -> dict:
     return {
         **_model_json(task),
         "spec": _model_json(task.latest_version.spec),
+        "search_query": request.app.state.planner.build_search_query(task.latest_version.spec),
         "capability": _model_json(_capability(request, task.latest_version.spec)),
         "current_run": _run_json(run) if run else None,
     }
@@ -241,6 +243,7 @@ def task_message(task_id: str, body: MessageRequest, request: Request) -> dict:
     return {
         "action": "new_version",
         "version": _model_json(version),
+        "search_query": request.app.state.planner.build_search_query(version.spec),
         "capability": _model_json(_capability(request, version.spec)),
     }
 
@@ -259,9 +262,17 @@ def task_results(
         raise HTTPException(status_code=404, detail="任务不存在") from None
     run = _current_run(request, task_id, task.latest_version.id)
     if not run:
-        return {"run_id": None, "run_status": None, "items": [], "view": view}
+        return {"run_id": None, "run_status": None, "items": [], "sources": [], "view": view}
 
     with request.app.state.database.connection() as connection:
+        snapshot_rows = connection.execute(
+            "SELECT ss.id AS snapshot_id, s.title, s.url, ss.fetched_at, "
+            "substr(ss.text, 1, 1200) AS excerpt "
+            "FROM source_snapshots ss JOIN sources s ON s.id=ss.source_id "
+            "WHERE ss.run_id=? ORDER BY ss.fetched_at, ss.id LIMIT 100",
+            (run["id"],),
+        ).fetchall()
+        sources = [dict(row) for row in snapshot_rows]
         rows = connection.execute(
             "SELECT o.*, e.id AS result_entity_id, e.canonical_name, e.identity_key "
             "FROM observations o JOIN entities e ON e.id=o.entity_id "
@@ -383,6 +394,7 @@ def task_results(
         "run_id": run["id"],
         "run_status": run["status"],
         "items": output,
+        "sources": sources,
         "view": view,
     }
 
@@ -401,6 +413,7 @@ def export_task(task_id: str, body: ExportRequest, request: Request) -> Response
             run_id=results["run_id"],
             spec=task.latest_version.spec,
             records=results["items"],
+            sources=results.get("sources", []),
             format=body.format,
             view=body.view,
             selected_entity_ids=body.entity_ids,
